@@ -16,19 +16,19 @@ import (
 )
 
 const (
-	// Default TCP timeout is not set
-	tcpTimeout     = 10 * time.Second
-	tcpIdleTimeout = 60 * time.Second
-	tcpMaxLength   = 2084
-	//messages
-	pduSizeRequested = 480
-	isoTCP           = 102 //default isotcp port
-	isoHSize         = 7   // TPKT+COTP Header Size
-	minPduSize       = 16
-	// Client Connection Type
-	connectionTypePG    = 1 // Connect to the PLC as a PG
-	connectionTypeOP    = 2 // Connect to the PLC as an OP
-	connectionTypeBasic = 3 // Basic connection
+	// 默认的 TCP 超时时间
+	tcpTimeout     = 10 * time.Second // TCP 连接超时时间
+	tcpIdleTimeout = 60 * time.Second // TCP 空闲超时时间
+	tcpMaxLength   = 2084             // TCP 消息的最大长度
+	// 消息相关
+	pduSizeRequested = 480 // 请求的 PDU 大小
+	isoTCP           = 102 // 默认的 ISO/TCP 端口
+	isoHSize         = 7   // TPKT+COTP 头部大小
+	minPduSize       = 16  // 最小的 PDU 大小
+	// 客户端连接类型
+	connectionTypePG    = 1 // 以 PG 方式连接到 例200 PLC 0x101 01.01
+	connectionTypeOP    = 2 // 以 OP 方式连接到 	  PLC 0x201 02.01
+	connectionTypeBasic = 3 // 基本连接			 		  0x301 03.01
 )
 
 // TCPClientHandler implements Packager and Transporter interface.
@@ -37,13 +37,17 @@ type TCPClientHandler struct {
 	tcpTransporter
 }
 
+func (h *TCPClientHandler) LocalAddr() string {
+	return h.tcpTransporter.LocalAddr()
+}
+
 // NewTCPClientHandler allocates a new TCPClientHandler.
 func NewTCPClientHandler(address string, rack int, slot int) *TCPClientHandler {
 	h := &TCPClientHandler{}
 	h.Address = address
 	h.Timeout = tcpTimeout
 	h.IdleTimeout = tcpIdleTimeout
-	h.ConnectionType = connectionTypePG // Connect to the PLC as a PG
+	h.ConnectionType = connectionTypeBasic // Connect to the PLC with basic connection type
 	remoteTSAP := uint16(h.ConnectionType)<<8 + (uint16(rack) * 0x20) + uint16(slot)
 	h.setConnectionParameters(address, 0x0100, remoteTSAP)
 	return h
@@ -242,7 +246,7 @@ func (mb *tcpTransporter) isoConnect() error {
 			err = fmt.Errorf("errIsoConnect")
 		}
 	} else {
-		err = fmt.Errorf(ErrorText(errIsoInvalidPDU))
+		err = fmt.Errorf("%s", ErrorText(errIsoInvalidPDU))
 	}
 	return err
 }
@@ -258,10 +262,10 @@ func (mb *tcpTransporter) negotiatePduLength() error {
 		// Get PDU Size Negotiated
 		mb.PDULength = int(binary.BigEndian.Uint16(response[25:]))
 		if mb.PDULength <= 0 {
-			err = fmt.Errorf(ErrorText(errCliNegotiatingPDU))
+			err = fmt.Errorf("%s", ErrorText(errCliNegotiatingPDU))
 		}
 	} else {
-		err = fmt.Errorf(ErrorText(errCliNegotiatingPDU))
+		err = fmt.Errorf("%s", ErrorText(errCliNegotiatingPDU))
 	}
 	return err
 }
@@ -301,6 +305,19 @@ func (mb *tcpTransporter) flush(b []byte) (err error) {
 	return
 }
 
+func (mb *tcpTransporter) LocalAddr() string {
+	mb.mu.Lock()
+	defer mb.mu.Unlock()
+	if mb.conn == nil {
+		return ""
+	}
+	addr := mb.conn.LocalAddr()
+	if addr == nil {
+		return ""
+	}
+	return addr.String()
+}
+
 func (mb *tcpTransporter) logf(format string, v ...interface{}) {
 	if mb.Logger != nil {
 		mb.Logger.Printf(format, v...)
@@ -316,15 +333,22 @@ func (mb *tcpTransporter) close() (err error) {
 	return
 }
 
-// closeIdle closes the connection if last activity is passed behind IdleTimeout.
+// closeIdle 在连接空闲时间超过 IdleTimeout 时关闭连接。
+// 该函数用于自动关闭空闲连接以及时释放资源。
+// 它首先检查 IdleTimeout 设置是否大于 0，因为非正数表示不启用空闲超时功能。
+// 然后计算自上次活动以来的时间（空闲时间）。如果这个时间超过了 IdleTimeout，它会记录关闭连接的原因并调用 close 方法来关闭连接。
+// 该函数通过互斥锁保护，以确保在访问共享资源时的线程安全。
 func (mb *tcpTransporter) closeIdle() {
 	mb.mu.Lock()
 	defer mb.mu.Unlock()
 
+	// 如果 IdleTimeout 不大于 0，则无需处理
 	if mb.IdleTimeout <= 0 {
 		return
 	}
+	// 计算空闲时间
 	idle := time.Now().Sub(mb.lastActivity)
+	// 如果空闲时间超过 IdleTimeout，则关闭连接
 	if idle >= mb.IdleTimeout {
 		mb.logf("s7: closing connection due to idle timeout: %v", idle)
 		mb.close()

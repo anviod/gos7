@@ -17,6 +17,7 @@ AG:
 *   Read/Write Timer (TM)  (tested)
 *   Read/Write Counter (CT) (tested)
 *   Multiple Read/Write Area (tested)
+*   Batch Read/Write Areas (ReadAreas/WriteAreas) (tested)
 *   Get Block Info (tested)
 
 PG:
@@ -69,8 +70,31 @@ err := client.AGReadDB(address, start, size, buf)
 var s7 gos7.Helper
 var result uint16
 s7.GetValueAt(buf, 0, &result)	 
-  
+
 ```
+
+Batch Operations:
+----------
+Batch operations allow reading/writing multiple areas in a single request, significantly improving performance by reducing network round trips.
+
+```go
+// Batch read multiple data blocks
+items := []gos7.S7DataItem{
+    {Area: gos7.S7AreaDB, DBNumber: 1, Start: 0, Amount: 10, WordLen: gos7.S7WLByte, Data: make([]byte, 10)},
+    {Area: gos7.S7AreaDB, DBNumber: 2, Start: 5, Amount: 20, WordLen: gos7.S7WLByte, Data: make([]byte, 20)},
+    {Area: gos7.S7AreaMK, Start: 100, Amount: 8, WordLen: gos7.S7WLByte, Data: make([]byte, 8)},
+}
+err := client.ReadAreas(items)
+// Data is now available in each item's Data field
+
+// Batch write multiple data blocks
+writeItems := []gos7.S7DataItem{
+    {Area: gos7.S7AreaDB, DBNumber: 1, Start: 0, Amount: 10, WordLen: gos7.S7WLByte, Data: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}},
+    {Area: gos7.S7AreaDB, DBNumber: 2, Start: 5, Amount: 4, WordLen: gos7.S7WLWord, Data: []byte{0x12, 0x34, 0x56, 0x78}},
+}
+err := client.WriteAreas(writeItems)
+```
+
 References
 ----------
 - libnodave http://libnodave.sourceforge.net/

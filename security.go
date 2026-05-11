@@ -64,10 +64,10 @@ func (mb *client) GetProtection() (protection S7Protection, err error) {
 func verifySecurityResponse(response []byte) (err error) {
 	if length := len(response); length > 30 { // the minimum expected
 		if result := binary.BigEndian.Uint16(response[27:]); result != 0 {
-			err = fmt.Errorf(ErrorText(CPUError(uint(result))))
+			err = fmt.Errorf("%s", ErrorText(CPUError(uint(result))))
 		}
 	} else {
-		err = fmt.Errorf(ErrorText(errIsoInvalidPDU))
+		err = fmt.Errorf("%s", ErrorText(errIsoInvalidPDU))
 	}
 	return err
 }

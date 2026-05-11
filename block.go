@@ -54,15 +54,15 @@ func (mb *client) DBGet(dbnumber int, usrdata []byte, size int) (err error) {
 				size = dbSize
 			}
 		} else {
-			err = fmt.Errorf(ErrorText(errCliBufferTooSmall))
+			err = fmt.Errorf("%s", ErrorText(errCliBufferTooSmall))
 		}
 	}
 	return
 }
 
-//internal class returns info about a given block in PLC memory.
-//This function is very useful if you need to read or write data in a DB
-//which you do not know the size in advance ( MC7Size).
+// internal class returns info about a given block in PLC memory.
+// This function is very useful if you need to read or write data in a DB
+// which you do not know the size in advance ( MC7Size).
 func (mb *client) GetAgBlockInfo(blocktype int, blocknum int) (info S7BlockInfo, err error) {
 	//init buffer
 	requestData := make([]byte, len(s7BlockInfoTelegram))
@@ -100,17 +100,17 @@ func (mb *client) GetAgBlockInfo(blocktype int, blocknum int) (info S7BlockInfo,
 				info.Version = int(response.Data[99])
 				info.CheckSum = int(binary.BigEndian.Uint16(response.Data[101:]))
 			} else {
-				err = fmt.Errorf(ErrorText(CPUError(uint(result))))
+				err = fmt.Errorf("%s", ErrorText(CPUError(uint(result))))
 			}
 
 		} else {
-			err = fmt.Errorf(ErrorText(errIsoInvalidPDU))
+			err = fmt.Errorf("%s", ErrorText(errIsoInvalidPDU))
 		}
 	}
 	return
 }
 
-//siemensTimestamp helper get Siemens timestamp
+// siemensTimestamp helper get Siemens timestamp
 func siemensTimestamp(EncodedDate int64) string {
 	return time.Date(1984, 1, 1, 0, 0, 0, 0, time.UTC).Add(time.Second * time.Duration((EncodedDate * 86400))).Format("02.01.2006")
 }

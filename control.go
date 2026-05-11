@@ -18,16 +18,16 @@ func (mb *client) PLCHotStart() error {
 	if err == nil {
 		if length := len(response.Data); length >= 20 { // 20 is the minimum expected
 			if int(response.Data[19]) != pduStart {
-				err = fmt.Errorf(ErrorText(errCliCannotStartPLC))
+				err = fmt.Errorf("%s", ErrorText(errCliCannotStartPLC))
 			} else if length >= 21 {
 				if int(response.Data[20]) == pduAlreadyStarted {
-					err = fmt.Errorf(ErrorText(errCliAlreadyRun))
+					err = fmt.Errorf("%s", ErrorText(errCliAlreadyRun))
 				} else {
-					err = fmt.Errorf(ErrorText(errCliCannotStartPLC))
+					err = fmt.Errorf("%s", ErrorText(errCliCannotStartPLC))
 				}
 			}
 		} else {
-			err = fmt.Errorf(ErrorText(errIsoInvalidPDU))
+			err = fmt.Errorf("%s", ErrorText(errIsoInvalidPDU))
 		}
 	}
 	return err
@@ -43,16 +43,16 @@ func (mb *client) PLCColdStart() error {
 	if err == nil {
 		if length := len(response.Data); length >= 20 { // 20 is the minimum expected
 			if int(response.Data[19]) != pduStart {
-				err = fmt.Errorf(ErrorText(errCliCannotStartPLC))
+				err = fmt.Errorf("%s", ErrorText(errCliCannotStartPLC))
 			} else if length >= 21 {
 				if int(response.Data[20]) == pduAlreadyStarted {
-					err = fmt.Errorf(ErrorText(errCliAlreadyRun))
+					err = fmt.Errorf("%s", ErrorText(errCliAlreadyRun))
 				} else {
-					err = fmt.Errorf(ErrorText(errCliCannotStartPLC))
+					err = fmt.Errorf("%s", ErrorText(errCliCannotStartPLC))
 				}
 			}
 		} else {
-			err = fmt.Errorf(ErrorText(errIsoInvalidPDU))
+			err = fmt.Errorf("%s", ErrorText(errIsoInvalidPDU))
 		}
 	}
 	return err
@@ -67,16 +67,16 @@ func (mb *client) PLCStop() error {
 	if err == nil {
 		if length := len(response.Data); length >= 20 { // 20 is the minimum expected
 			if int(response.Data[19]) != pduStop {
-				err = fmt.Errorf(ErrorText(errCliCannotStopPLC))
+				err = fmt.Errorf("%s", ErrorText(errCliCannotStopPLC))
 			} else if length >= 21 {
 				if int(response.Data[20]) == pduAlreadyStopped {
-					err = fmt.Errorf(ErrorText(errCliAlreadyStop))
+					err = fmt.Errorf("%s", ErrorText(errCliAlreadyStop))
 				} else {
-					err = fmt.Errorf(ErrorText(errCliCannotStopPLC))
+					err = fmt.Errorf("%s", ErrorText(errCliCannotStopPLC))
 				}
 			}
 		} else {
-			err = fmt.Errorf(ErrorText(errIsoInvalidPDU))
+			err = fmt.Errorf("%s", ErrorText(errIsoInvalidPDU))
 		}
 	}
 	return err
@@ -102,10 +102,10 @@ func (mb *client) PLCGetStatus() (status int, err error) {
 				}
 
 			} else {
-				err = fmt.Errorf(ErrorText(CPUError(uint(result))))
+				err = fmt.Errorf("%s", ErrorText(CPUError(uint(result))))
 			}
 		} else {
-			err = fmt.Errorf(ErrorText(errIsoInvalidPDU))
+			err = fmt.Errorf("%s", ErrorText(errIsoInvalidPDU))
 		}
 	}
 	return

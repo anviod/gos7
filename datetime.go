@@ -21,11 +21,11 @@ func (mb *client) PGClockWrite() (datetime time.Time, err error) {
 			var s7 Helper
 			datetime = s7.GetDateTimeAt(response.Data, 35)
 		} else {
-			err = fmt.Errorf(ErrorText(errCliInvalidPlcAnswer))
+			err = fmt.Errorf("%s", ErrorText(errCliInvalidPlcAnswer))
 		}
 
 	} else {
-		err = fmt.Errorf(ErrorText(errIsoInvalidPDU))
+		err = fmt.Errorf("%s", ErrorText(errIsoInvalidPDU))
 	}
 	return
 }
@@ -42,10 +42,10 @@ func (mb *client) PGClockRead(datetime time.Time) (err error) {
 	response, err := mb.send(&request)
 	if length := len(response.Data); length > 30 {
 		if binary.BigEndian.Uint16(response.Data[27:]) != 0 {
-			err = fmt.Errorf(ErrorText(errCliInvalidPlcAnswer))
+			err = fmt.Errorf("%s", ErrorText(errCliInvalidPlcAnswer))
 		}
 	} else {
-		err = fmt.Errorf(ErrorText(errIsoInvalidPDU))
+		err = fmt.Errorf("%s", ErrorText(errIsoInvalidPDU))
 	}
 	return
 }

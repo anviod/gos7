@@ -139,11 +139,11 @@ func (mb *client) readSzl(id int, index int) (szl S7SZL, size int, err error) {
 			return
 		}
 		if length := len(res.Data); length <= 32 {
-			err = fmt.Errorf(ErrorText(errIsoInvalidPDU))
+			err = fmt.Errorf("%s", ErrorText(errIsoInvalidPDU))
 			return
 		}
 		if binary.BigEndian.Uint16(res.Data[27:]) != 0 && res.Data[29] != byte(0xFF) {
-			err = fmt.Errorf(ErrorText(errCliInvalidPlcAnswer))
+			err = fmt.Errorf("%s", ErrorText(errCliInvalidPlcAnswer))
 			return
 		}
 		if first {
