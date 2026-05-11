@@ -1,12 +1,11 @@
 package gos7
 
-import (
-	"fmt"
-)
-
 // Copyright 2018 Trung Hieu Le. All rights reserved.
 // This software may be modified and distributed under the terms
 // of the BSD license. See the LICENSE file for details.
+
+import "encoding/binary"
+
 const (
 	// Block type byte
 	blockOB  = 56
@@ -32,14 +31,29 @@ type S7BlocksList struct {
 //implement list block
 func (mb *client) PGListBlocks() (list S7BlocksList, err error) {
 	list.OBList, err = mb.pgBlockList(blockOB)
-	//debug
-	fmt.Printf("%v", list.DBList)
+	if err != nil {
+		return
+	}
 	list.DBList, err = mb.pgBlockList(blockDB)
+	if err != nil {
+		return
+	}
 	list.FCList, err = mb.pgBlockList(blockFC)
-	list.OBList, err = mb.pgBlockList(blockOB)
+	if err != nil {
+		return
+	}
 	list.FBList, err = mb.pgBlockList(blockFB)
+	if err != nil {
+		return
+	}
 	list.SDBList, err = mb.pgBlockList(blockSDB)
+	if err != nil {
+		return
+	}
 	list.SFBList, err = mb.pgBlockList(blockSFB)
+	if err != nil {
+		return
+	}
 	list.SFCList, err = mb.pgBlockList(blockSFC)
 	return
 }
@@ -77,9 +91,10 @@ func (mb *client) pgBlockList(blockType byte) (arr []int, err error) {
 	return
 }
 func dataToBlocks(data []byte) []int {
-	arr := make([]int, len(data)/4)
-	for i := 0; i <= len(data)/4-1; i++ {
-		arr[i] = int(data[i*4])*256 + int(data[i*4+1])
+	count := len(data) / 4
+	arr := make([]int, count)
+	for i := 0; i < count; i++ {
+		arr[i] = int(binary.BigEndian.Uint16(data[i*4 : i*4+2]))
 	}
 	return arr
 }

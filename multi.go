@@ -52,99 +52,121 @@ func (mb *client) AGWriteMulti(dataItems []S7DataItem, itemsCount int) (err erro
 		return
 	}
 
-	// Initialize telegram with write header
-	// 使用写入头初始化报文
-	s7Multi := make([]byte, len(s7MultiWriteHeaderTelegram))
+	paramItemLen := len(s7MultiWriteItemTelegram)
+
+	// Pre-calculate total telegram size to avoid O(n²) appends.
+	// 预计算总报文大小以避免 O(n²) 的 append 操作。
+	totalDataSize := 0
+	for i := 0; i < itemsCount; i++ {
+		itemDataSize := dataItems[i].Amount * dataSizeByte(dataItems[i].WordLen)
+		if dataItems[i].WordLen == s7wlbit {
+			itemDataSize = dataItems[i].Amount
+		} else if dataItems[i].WordLen == s7wlcounter || dataItems[i].WordLen == s7wltimer {
+			itemDataSize = dataItems[i].Amount * 2
+		}
+		// Pad to even
+		if itemDataSize%2 != 0 {
+			itemDataSize++
+		}
+		totalDataSize += itemDataSize + 4 // 4 bytes header per item
+	}
+
+	headerLen := len(s7MultiWriteHeaderTelegram)
+	totalSize := headerLen + itemsCount*paramItemLen + totalDataSize
+
+	// Allocate telegram buffer once
+	// 一次性分配报文缓冲区
+	s7Multi := make([]byte, totalSize)
 	copy(s7Multi, s7MultiWriteHeaderTelegram)
 
 	// Calculate and set parameter length
 	// 计算并设置参数长度
-	parLength := itemsCount*len(s7MultiWriteItemTelegram) + 2
+	parLength := itemsCount*paramItemLen + 2
 	binary.BigEndian.PutUint16(s7Multi[13:], uint16(parLength))
 	s7Multi[18] = byte(itemsCount)
 
-	// Build parameter section for each item
-	// 为每个项目构建参数部分
-	offset := len(s7MultiWriteHeaderTelegram)
+	// Build parameter section for each item (direct copy into pre-allocated buffer)
+	// 为每个项目构建参数部分（直接拷贝到预分配的缓冲区）
+	offset := headerLen
+	paramBuf := make([]byte, paramItemLen) // reusable parameter item buffer
 	for i := 0; i < itemsCount; i++ {
-		s7ParamItem := make([]byte, len(s7MultiWriteItemTelegram))
-		copy(s7ParamItem, s7MultiWriteItemTelegram)
+		copy(paramBuf, s7MultiWriteItemTelegram)
 
 		// Set word length, area, amount, and DB number
 		// 设置字长度、区域、数量和DB编号
-		s7ParamItem[3] = byte(dataItems[i].WordLen)
-		s7ParamItem[8] = byte(dataItems[i].Area)
-		binary.BigEndian.PutUint16(s7ParamItem[4:], uint16(dataItems[i].Amount))
-		binary.BigEndian.PutUint16(s7ParamItem[6:], uint16(dataItems[i].DBNumber))
+		paramBuf[3] = byte(dataItems[i].WordLen)
+		paramBuf[8] = byte(dataItems[i].Area)
+		binary.BigEndian.PutUint16(paramBuf[4:], uint16(dataItems[i].Amount))
+		binary.BigEndian.PutUint16(paramBuf[6:], uint16(dataItems[i].DBNumber))
 
 		// Calculate address based on data type
 		// 根据数据类型计算地址
-		var addr int
+		var addr uint32
 		if dataItems[i].WordLen == s7wlbit || dataItems[i].WordLen == s7wlcounter || dataItems[i].WordLen == s7wltimer {
-			addr = dataItems[i].Start
+			addr = uint32(dataItems[i].Start)
 		} else {
-			addr = dataItems[i].Start * 8
+			addr = uint32(dataItems[i].Start) * 8
 		}
 
-		// Encode address into 3 bytes
-		// 将地址编码为3字节
-		s7ParamItem[11] = byte(addr & 0x0FF)
-		addr = addr >> 8
-		s7ParamItem[10] = byte(addr & 0x0FF)
-		addr = addr >> 8
-		s7ParamItem[9] = byte(addr & 0x0FF)
+		// Encode address into 3 bytes using helper
+		// 使用辅助函数将地址编码为3字节
+		putUint24(paramBuf[9:12], addr)
 
-		// Insert parameter item into telegram
-		// 将参数项插入报文
-		s7Multi = append(s7Multi[:offset], append(s7ParamItem, s7Multi[offset:]...)...)
-		offset += len(s7ParamItem)
+		// Copy parameter item directly into telegram
+		// 直接将参数项拷贝到报文中
+		copy(s7Multi[offset:], paramBuf)
+		offset += paramItemLen
 	}
 
-	// Build data section for each item
-	// 为每个项目构建数据部分
+	// Build data section for each item (direct copy into pre-allocated buffer)
+	// 为每个项目构建数据部分（直接拷贝到预分配的缓冲区）
 	dataLength := 0
 	for i := 0; i < itemsCount; i++ {
-		s7ItemWrite := make([]byte, 1024)
-		s7ItemWrite[0] = 0
 		itemDataSize := 0
+		var transportSize byte
 
 		// Determine transport size and data size based on word length
 		// 根据字长度确定传输大小和数据大小
 		switch dataItems[i].WordLen {
 		case s7wlbit:
-			s7ItemWrite[1] = tsResBit
+			transportSize = tsResBit
 			itemDataSize = dataItems[i].Amount
-			binary.BigEndian.PutUint16(s7ItemWrite[2:], uint16(itemDataSize))
 		case s7wlcounter, s7wltimer:
-			s7ItemWrite[1] = tsResOctet
+			transportSize = tsResOctet
 			itemDataSize = dataItems[i].Amount * 2
-			binary.BigEndian.PutUint16(s7ItemWrite[2:], uint16(itemDataSize))
 		case s7wlreal:
-			s7ItemWrite[1] = tsResReal
+			transportSize = tsResReal
 			itemDataSize = dataItems[i].Amount * dataSizeByte(dataItems[i].WordLen)
-			binary.BigEndian.PutUint16(s7ItemWrite[2:], uint16(itemDataSize))
 		default:
-			s7ItemWrite[1] = tsResByte
+			transportSize = tsResByte
 			itemDataSize = dataItems[i].Amount * dataSizeByte(dataItems[i].WordLen)
-			binary.BigEndian.PutUint16(s7ItemWrite[2:], uint16(itemDataSize*8))
 		}
 
-		// Copy data to item buffer
-		// 将数据复制到项目缓冲区
-		copy(s7ItemWrite[4:4+itemDataSize], dataItems[i].Data)
+		// Write 4-byte item header directly
+		// 直接写入4字节项头
+		s7Multi[offset] = 0
+		s7Multi[offset+1] = transportSize
+
+		if dataItems[i].WordLen == s7wlcounter || dataItems[i].WordLen == s7wltimer || dataItems[i].WordLen == s7wlreal {
+			binary.BigEndian.PutUint16(s7Multi[offset+2:], uint16(itemDataSize))
+		} else {
+			binary.BigEndian.PutUint16(s7Multi[offset+2:], uint16(itemDataSize*8))
+		}
+
+		// Copy data directly into telegram
+		// 直接将数据拷贝到报文中
+		copy(s7Multi[offset+4:], dataItems[i].Data[:itemDataSize])
 
 		// Pad to even size if necessary
 		// 如果需要，填充为偶数大小
+		totalItemSize := itemDataSize + 4
 		if itemDataSize%2 != 0 {
-			s7ItemWrite[itemDataSize+4] = 0
-			itemDataSize++
+			s7Multi[offset+4+itemDataSize] = 0
+			totalItemSize++
 		}
 
-		// Append item data to telegram
-		// 将项目数据附加到报文
-		s7Multi = append(s7Multi, s7ItemWrite[0:itemDataSize+4]...)
-		offset = offset + itemDataSize + 4
-		dataLength = dataLength + itemDataSize + 4
+		offset += totalItemSize
+		dataLength += totalItemSize
 	}
 
 	// Check PDU size limit
@@ -236,23 +258,18 @@ func (mb *client) AGReadMulti(dataItems []S7DataItem, itemsCount int) (err error
 
 		// Calculate address based on data type
 		// 根据数据类型计算地址
-		var addr int
+		var addr uint32
 		if dataItems[i].WordLen == s7wlcounter || dataItems[i].WordLen == s7wltimer {
-			addr = dataItems[i].Start
+			addr = uint32(dataItems[i].Start)
 		} else if dataItems[i].WordLen == s7wlbit {
-			addr = dataItems[i].Start << 3
-			addr += dataItems[i].Bit
+			addr = uint32(dataItems[i].Start)<<3 + uint32(dataItems[i].Bit)
 		} else {
-			addr = dataItems[i].Start * 8
+			addr = uint32(dataItems[i].Start) * 8
 		}
 
-		// Encode address into 3 bytes
-		// 将地址编码为3字节
-		s7Item[11] = byte(addr & 0x0FF)
-		addr = addr >> 8
-		s7Item[10] = byte(addr & 0x0FF)
-		addr = addr >> 8
-		s7Item[9] = byte(addr & 0x0FF)
+		// Encode address into 3 bytes using helper
+		// 使用辅助函数将地址编码为3字节
+		putUint24(s7Item[9:12], addr)
 
 		// Append item to telegram
 		// 将项目附加到报文

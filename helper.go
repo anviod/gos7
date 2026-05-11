@@ -17,22 +17,88 @@ type Helper struct{}
 
 //SetValueAt set a value at a position of a byte array,
 //which based on builtin function: https://golang.org/pkg/encoding/binary/#Read
+//Optimized: uses direct byte operations for common types to avoid bytes.Buffer allocation.
 func (s7 *Helper) SetValueAt(buffer []byte, pos int, data interface{}) {
-	buf := new(bytes.Buffer)
-	err := binary.Write(buf, binary.BigEndian, data)
-	if err != nil {
-		fmt.Println("binary.Write failed:", err)
+	switch v := data.(type) {
+	case uint16:
+		binary.BigEndian.PutUint16(buffer[pos:], v)
+	case *uint16:
+		binary.BigEndian.PutUint16(buffer[pos:], *v)
+	case int16:
+		binary.BigEndian.PutUint16(buffer[pos:], uint16(v))
+	case uint32:
+		binary.BigEndian.PutUint32(buffer[pos:], v)
+	case *uint32:
+		binary.BigEndian.PutUint32(buffer[pos:], *v)
+	case int32:
+		binary.BigEndian.PutUint32(buffer[pos:], uint32(v))
+	case uint64:
+		binary.BigEndian.PutUint64(buffer[pos:], v)
+	case *uint64:
+		binary.BigEndian.PutUint64(buffer[pos:], *v)
+	case int64:
+		binary.BigEndian.PutUint64(buffer[pos:], uint64(v))
+	case byte:
+		buffer[pos] = v
+	case float32:
+		binary.BigEndian.PutUint32(buffer[pos:], math.Float32bits(v))
+	case float64:
+		binary.BigEndian.PutUint64(buffer[pos:], math.Float64bits(v))
+	default:
+		// Fallback for less common types
+		buf := new(bytes.Buffer)
+		err := binary.Write(buf, binary.BigEndian, data)
+		if err != nil {
+			fmt.Println("binary.Write failed:", err)
+		}
+		copy(buffer[pos:], buf.Bytes())
 	}
-	copy(buffer[pos:], buf.Bytes())
 }
 
 //GetValueAt set a value at a position of a byte array,
 // which based on  builtin function: https://golang.org/pkg/encoding/binary/#Write
+//Optimized: uses direct byte operations for common types to avoid bytes.Reader allocation.
 func (s7 *Helper) GetValueAt(buffer []byte, pos int, value interface{}) {
-	buf := bytes.NewReader(buffer[pos:])
-	if err := binary.Read(buf, binary.BigEndian, value); err != nil {
-		fmt.Println("binary.Read failed:", err)
+	switch v := value.(type) {
+	case *uint16:
+		*v = binary.BigEndian.Uint16(buffer[pos:])
+	case *int16:
+		*v = int16(binary.BigEndian.Uint16(buffer[pos:]))
+	case *uint32:
+		*v = binary.BigEndian.Uint32(buffer[pos:])
+	case *int32:
+		*v = int32(binary.BigEndian.Uint32(buffer[pos:]))
+	case *uint64:
+		*v = binary.BigEndian.Uint64(buffer[pos:])
+	case *int64:
+		*v = int64(binary.BigEndian.Uint64(buffer[pos:]))
+	case *byte:
+		*v = buffer[pos]
+	case *float32:
+		*v = math.Float32frombits(binary.BigEndian.Uint32(buffer[pos:]))
+	case *float64:
+		*v = math.Float64frombits(binary.BigEndian.Uint64(buffer[pos:]))
+	default:
+		// Fallback for less common types
+		buf := bytes.NewReader(buffer[pos:])
+		if err := binary.Read(buf, binary.BigEndian, value); err != nil {
+			fmt.Println("binary.Read failed:", err)
+		}
 	}
+}
+
+// putUint24 writes a 24-bit (3 byte) big-endian unsigned integer.
+func putUint24(b []byte, v uint32) {
+	_ = b[2] // bounds check hint
+	b[0] = byte(v >> 16)
+	b[1] = byte(v >> 8)
+	b[2] = byte(v)
+}
+
+// uint24 reads a 24-bit (3 byte) big-endian unsigned integer.
+func uint24(b []byte) uint32 {
+	_ = b[2] // bounds check hint
+	return uint32(b[0])<<16 | uint32(b[1])<<8 | uint32(b[2])
 }
 
 //GetRealAt 32 bit floating point number (S7 Real) (Range of float32)

@@ -19,6 +19,14 @@ const (
 	s7areact = 0x1C // Counters / 计数器区 (C)
 	s7areatm = 0x1D // Timers / 定时器区 (T)
 
+	// maxItemsPerBatch is the maximum number of items per multi-read/write batch.
+	// S7 protocol limits to 20 items, but for ARM/low-memory devices, use 10
+	// to reduce peak memory usage during batch operations.
+	// maxItemsPerBatch 是每次多读写操作的最大项目数。
+	// S7 协议限制为 20 个项目，但对于 ARM/低内存设备，使用 10 个
+	// 以减少批量操作期间的峰值内存使用。
+	maxItemsPerBatch = 20
+
 	// Word Length - 数据类型长度
 	s7wlbit     = 0x01 // Bit (inside a word) / 位
 	s7wlbyte    = 0x02 // Byte (8 bit) / 字节
@@ -329,13 +337,9 @@ func (mb *client) readArea(area int, dbNumber int, start int, amount int, wordLe
 		// 设置元素数量
 		binary.BigEndian.PutUint16(request.Data[23:], uint16(numElements))
 
-		// Encode address into 3 bytes
-		// 将地址编码为3字节
-		request.Data[30] = byte(address & 0x0FF)
-		address = address >> 8
-		request.Data[29] = byte(address & 0x0FF)
-		address = address >> 8
-		request.Data[28] = byte(address & 0x0FF)
+		// Encode address into 3 bytes using helper
+		// 使用辅助函数将地址编码为3字节
+		putUint24(request.Data[28:31], uint32(address))
 
 		// Send request and get response
 		// 发送请求并获取响应
@@ -479,36 +483,31 @@ func (mb *client) writeArea(area int, dbnumber int, start int, amount int, wordl
 		// 设置元素数量
 		binary.BigEndian.PutUint16(request.Data[23:], uint16(numElements))
 
-		// Encode address into 3 bytes
-		// 将地址编码为3字节
-		request.Data[30] = byte(address & 0x0FF)
-		address = address >> 8
-		request.Data[29] = byte(address & 0x0FF)
-		address = address >> 8
-		request.Data[28] = byte(address & 0x0FF)
+		// Encode address into 3 bytes using helper
+		// 使用辅助函数将地址编码为3字节
+		putUint24(request.Data[28:31], uint32(address))
 
 		// Set transport size based on data type
 		// 根据数据类型设置传输大小
 		switch wordlen {
 		case s7wlbit:
 			request.Data[32] = tsResBit
-			break
-		case s7wlcounter:
-		case s7wltimer:
+		case s7wlcounter, s7wltimer:
 			request.Data[32] = tsResOctet
-			break
 		default:
 			request.Data[32] = tsResByte // byte/word/dword etc.
-			break
 		}
 
 		// Set data length field
 		// 设置数据长度字段
 		binary.BigEndian.PutUint16(request.Data[33:], uint16(length))
 
-		// Append data to request
-		// 将数据附加到请求中
-		request.Data = append(request.Data[:35], append(buffer[offset:offset+dataSize], request.Data[35:]...)...)
+		// Build complete request: header + data (pre-allocated, no nested append)
+		// 构建完整请求：头部 + 数据（预分配，无嵌套 append）
+		completeData := make([]byte, sizeHeaderWrite+dataSize)
+		copy(completeData, request.Data[:sizeHeaderWrite])
+		copy(completeData[sizeHeaderWrite:], buffer[offset:offset+dataSize])
+		request.Data = completeData
 
 		// Send request and get response
 		// 发送请求并获取响应
@@ -759,11 +758,12 @@ func (mb *client) ReadArea(area int, dbNumber int, start int, amount int, wordLe
 }
 
 // ReadAreas reads multiple S7 data items from PLC in batches.
-// It splits the items into batches of up to 20 items and performs
-// multi-read operations for each batch.
+// It splits the items into batches and performs multi-read operations for each batch.
+// Batch size is architecture-specific: 10 on ARM (low memory), 20 on other architectures.
 //
 // ReadAreas 从PLC批量读取多个S7数据项。
-// 将数据项按最多20个一批分组，对每批执行多区域读取操作。
+// 将数据项按批次分组，对每批执行多区域读取操作。
+// 批量大小是架构特定的：ARM 上为 10（低内存），其他架构为 20。
 //
 // Parameters:
 //
@@ -774,9 +774,8 @@ func (mb *client) ReadAreas(items []S7DataItem) (err error) {
 	if itemsCount == 0 {
 		return
 	}
-	maxBatchSize := 20
-	for i := 0; i < itemsCount; i += maxBatchSize {
-		end := i + maxBatchSize
+	for i := 0; i < itemsCount; i += maxItemsPerBatch {
+		end := i + maxItemsPerBatch
 		if end > itemsCount {
 			end = itemsCount
 		}
@@ -790,11 +789,12 @@ func (mb *client) ReadAreas(items []S7DataItem) (err error) {
 }
 
 // WriteAreas writes multiple S7 data items to PLC in batches.
-// It splits the items into batches of up to 20 items and performs
-// multi-write operations for each batch.
+// It splits the items into batches and performs multi-write operations for each batch.
+// Batch size is architecture-specific: 10 on ARM (low memory), 20 on other architectures.
 //
 // WriteAreas 向PLC批量写入多个S7数据项。
-// 将数据项按最多20个一批分组，对每批执行多区域写入操作。
+// 将数据项按批次分组，对每批执行多区域写入操作。
+// 批量大小是架构特定的：ARM 上为 10（低内存），其他架构为 20。
 //
 // Parameters:
 //
@@ -805,9 +805,8 @@ func (mb *client) WriteAreas(items []S7DataItem) (err error) {
 	if itemsCount == 0 {
 		return
 	}
-	maxBatchSize := 20
-	for i := 0; i < itemsCount; i += maxBatchSize {
-		end := i + maxBatchSize
+	for i := 0; i < itemsCount; i += maxItemsPerBatch {
+		end := i + maxItemsPerBatch
 		if end > itemsCount {
 			end = itemsCount
 		}
