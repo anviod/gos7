@@ -41,6 +41,11 @@ func (h *TCPClientHandler) LocalAddr() string {
 	return h.tcpTransporter.LocalAddr()
 }
 
+// GetPDULength implements the PDUProvider interface
+func (h *TCPClientHandler) GetPDULength() int {
+	return h.PDULength
+}
+
 // NewTCPClientHandler allocates a new TCPClientHandler.
 func NewTCPClientHandler(address string, rack int, slot int) *TCPClientHandler {
 	h := &TCPClientHandler{}
@@ -48,6 +53,7 @@ func NewTCPClientHandler(address string, rack int, slot int) *TCPClientHandler {
 	h.Timeout = tcpTimeout
 	h.IdleTimeout = tcpIdleTimeout
 	h.ConnectionType = connectionTypeBasic // Connect to the PLC with basic connection type
+	h.PDULength = pduSizeRequested         // Set default PDU length
 	remoteTSAP := uint16(h.ConnectionType)<<8 + (uint16(rack) * 0x20) + uint16(slot)
 	h.setConnectionParameters(address, 0x0100, remoteTSAP)
 	return h
@@ -60,6 +66,7 @@ func NewTCPClientHandlerWithConnectType(address string, rack int, slot int, conn
 	h.Timeout = tcpTimeout
 	h.IdleTimeout = tcpIdleTimeout
 	h.ConnectionType = connectType
+	h.PDULength = pduSizeRequested // Set default PDU length
 	remoteTSAP := uint16(h.ConnectionType)<<8 + (uint16(rack) * 0x20) + uint16(slot)
 	h.setConnectionParameters(address, 0x0100, remoteTSAP)
 	return h

@@ -25,7 +25,9 @@ func TestTCPClient(t *testing.T) {
 	handler.Timeout = 200 * time.Second
 	handler.IdleTimeout = 200 * time.Second
 	handler.Logger = log.New(os.Stdout, "tcp: ", log.LstdFlags)
-	handler.Connect()
+	if err := handler.Connect(); err != nil {
+		t.Skipf("Skipping test - unable to connect to PLC: %v", err)
+	}
 	defer handler.Close()
 	client := gos7.NewClient(handler)
 	ClientTestAll(t, client)

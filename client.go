@@ -30,11 +30,39 @@ const (
 	s7wlreal    = 0x08 // Real (32 bit float) / 浮点数
 	s7wlcounter = 0x1C // Counter (16 bit) / 计数器
 	s7wltimer   = 0x1D // Timer (16 bit) / 定时器
+)
+
+// Exported area and word length constants for S7DataItem usage
+const (
+	// Area ID (exported) - 区域标识符
+	S7AreaPE = s7areape // Process Inputs / 过程输入区 (I)
+	S7AreaPA = s7areapa // Process Outputs / 过程输出区 (Q)
+	S7AreaMK = s7areamk // Merkers / 标志位区 (M)
+	S7AreaDB = s7areadb // Data Block / 数据块 (DB)
+	S7AreaCT = s7areact // Counters / 计数器区 (C)
+	S7AreaTM = s7areatm // Timers / 定时器区 (T)
+
+	// Word Length (exported) - 数据类型长度
+	S7WLBit     = s7wlbit     // Bit (inside a word) / 位
+	S7WLByte    = s7wlbyte    // Byte (8 bit) / 字节
+	S7WLChar    = s7wlChar    // Char / 字符
+	S7WLWord    = s7wlword    // Word (16 bit) / 字
+	S7WLInt     = s7wlint     // Int / 整数
+	S7WLDWord   = s7wldword   // Double Word (32 bit) / 双字
+	S7WLDInt    = s7wldint    // DInt / 双整数
+	S7WLReal    = s7wlreal    // Real (32 bit float) / 浮点数
+	S7WLCounter = s7wlcounter // Counter (16 bit) / 计数器
+	S7WLTimer   = s7wltimer   // Timer (16 bit) / 定时器
 
 	// PLC Status - PLC状态
 	s7CpuStatusUnknown = 0 // Unknown / 未知
 	s7CpuStatusRun     = 8 // Running / 运行中
 	s7CpuStatusStop    = 4 // Stopped / 停止
+
+	// PLC Status (exported) - PLC状态
+	S7CpuStatusUnknown = s7CpuStatusUnknown // Unknown / 未知
+	S7CpuStatusRun     = s7CpuStatusRun     // Running / 运行中
+	S7CpuStatusStop    = s7CpuStatusStop    // Stopped / 停止
 
 	// Header Size - 协议头大小
 	sizeHeaderRead  int = 31 // Header Size when Reading / 读取操作的协议头大小
@@ -51,6 +79,16 @@ const (
 // PDULength variable stores PDU length after connection
 // PDULength 变量用于存储连接后的PDU长度
 
+// PDUProvider is an optional interface that provides the negotiated PDU length.
+// Implementations that are not *TCPClientHandler should implement this interface
+// to allow the client to determine PDU boundaries.
+//
+// PDUProvider 是一个可选接口，提供协商后的 PDU 长度。
+// 非 *TCPClientHandler 的实现应实现此接口，以允许客户端确定 PDU 边界。
+type PDUProvider interface {
+	GetPDULength() int
+}
+
 // ClientHandler is the interface that groups the Packager and Transporter methods.
 // ClientHandler 接口组合了 Packager 和 Transporter 方法
 type ClientHandler interface {
@@ -63,6 +101,23 @@ type ClientHandler interface {
 type client struct {
 	packager    Packager
 	transporter Transporter
+}
+
+// getPDU retrieves the negotiated PDU length from the transporter.
+// It first checks for *TCPClientHandler (the standard implementation),
+// then falls back to the PDUProvider interface for custom implementations.
+//
+// getPDU 从传输器获取协商后的 PDU 长度。
+// 它首先检查 *TCPClientHandler（标准实现），
+// 然后回退到 PDUProvider 接口（自定义实现）。
+func (mb *client) getPDU() int {
+	if tt, ok := interface{}(mb.transporter).(*TCPClientHandler); ok {
+		return tt.PDULength
+	}
+	if pp, ok := interface{}(mb.transporter).(PDUProvider); ok {
+		return pp.GetPDULength()
+	}
+	return 480 // default PDU size
 }
 
 // NewClient creates a new S7 client with given backend handler.
@@ -228,11 +283,11 @@ func (mb *client) readArea(area int, dbNumber int, start int, amount int, wordLe
 
 	// Get PDU length from transporter
 	// 从传输器获取PDU长度
-	tt, _ := interface{}(mb.transporter).(*TCPClientHandler)
+	pduLength := mb.getPDU()
 
 	// Calculate max elements per request based on PDU size
 	// 根据PDU大小计算每次请求的最大元素数
-	maxElements = (tt.PDULength - 18) / wordSize // 18 = Reply telegram header
+	maxElements = (pduLength - 18) / wordSize // 18 = Reply telegram header
 	totElements = amount
 
 	// Process in chunks if amount exceeds maxElements per request
@@ -368,8 +423,8 @@ func (mb *client) writeArea(area int, dbnumber int, start int, amount int, wordl
 
 	// Get PDU length from transporter
 	// 从传输器获取PDU长度
-	tt, _ := interface{}(mb.transporter).(*TCPClientHandler)
-	maxElements = (tt.PDULength - 35) / wordSize // 35 = Reply telegram header
+	pduLength := mb.getPDU()
+	maxElements = (pduLength - 35) / wordSize // 35 = Reply telegram header
 	totElements = amount
 
 	// Process in chunks if amount exceeds maxElements per request

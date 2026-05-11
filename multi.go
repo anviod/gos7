@@ -149,8 +149,8 @@ func (mb *client) AGWriteMulti(dataItems []S7DataItem, itemsCount int) (err erro
 
 	// Check PDU size limit
 	// 检查PDU大小限制
-	tt, _ := interface{}(mb.transporter).(*TCPClientHandler)
-	if offset > tt.PDULength {
+	pduLength := mb.getPDU()
+	if offset > pduLength {
 		err = fmt.Errorf("%s", ErrorText(errCliSizeOverPDU))
 		return
 	}
@@ -262,8 +262,8 @@ func (mb *client) AGReadMulti(dataItems []S7DataItem, itemsCount int) (err error
 
 	// Check PDU size limit
 	// 检查PDU大小限制
-	tt, _ := interface{}(mb.transporter).(*TCPClientHandler)
-	if offset > tt.PDULength {
+	pduLength := mb.getPDU()
+	if offset > pduLength {
 		err = fmt.Errorf("%s", ErrorText(errCliSizeOverPDU))
 		return
 	}
