@@ -80,7 +80,7 @@ type Client interface {
 
 	// Read reads a variable using S7 syntax (e.g., "DB1.DBB0", "MB10")
 	// Read 使用S7语法读取变量（例如 "DB1.DBB0", "MB10"）
-	Read(variable string, buffer []byte) (value interface{}, err error)
+	Read(variable string, buffer []byte) (value any, err error)
 
 	// GetAgBlockInfo retrieves block information from AG area
 	// GetAgBlockInfo 从AG区域获取块信息

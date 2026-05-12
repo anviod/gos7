@@ -123,42 +123,42 @@ func (m *MockClientHandler) handleRead(request []byte) ([]byte, error) {
 	idx++ // [6]
 
 	// S7 Header [7:17]
-	resp[idx] = 0x32 // Protocol ID
-	idx++            // [7]
-	resp[idx] = 0x03 // Message type: Ack Data
-	idx++            // [8]
-	resp[idx] = 0x00 // Reserved
-	idx++ // [9]
-	resp[idx] = 0x00 // Reserved
-	idx++ // [10]
-	resp[idx] = request[11] // PDU ref high (echo back)
-	idx++ // [11]
-	resp[idx] = request[12] // PDU ref low (echo back)
-	idx++ // [12]
-	binary.BigEndian.PutUint16(resp[idx:], 0x0002) // Parameter length = 2
-	idx += 2 // [13:15]
+	resp[idx] = 0x32                                                    // Protocol ID
+	idx++                                                               // [7]
+	resp[idx] = 0x03                                                    // Message type: Ack Data
+	idx++                                                               // [8]
+	resp[idx] = 0x00                                                    // Reserved
+	idx++                                                               // [9]
+	resp[idx] = 0x00                                                    // Reserved
+	idx++                                                               // [10]
+	resp[idx] = request[11]                                             // PDU ref high (echo back)
+	idx++                                                               // [11]
+	resp[idx] = request[12]                                             // PDU ref low (echo back)
+	idx++                                                               // [12]
+	binary.BigEndian.PutUint16(resp[idx:], 0x0002)                      // Parameter length = 2
+	idx += 2                                                            // [13:15]
 	binary.BigEndian.PutUint16(resp[idx:], uint16(len(data)+4+padding)) // Data length
-	idx += 2 // [15:17]
+	idx += 2                                                            // [15:17]
 
 	// Error class + Error code [17:19]
 	resp[idx] = 0x00 // Error class = no error
-	idx++ // [17]
+	idx++            // [17]
 	resp[idx] = 0x00 // Error code = no error
-	idx++ // [18]
+	idx++            // [18]
 
 	// Parameter section [19:21]
 	resp[idx] = 0x04 // Function: Read
-	idx++ // [19]
+	idx++            // [19]
 	resp[idx] = 0x01 // Item count = 1
-	idx++ // [20]
+	idx++            // [20]
 
 	// Data section - Item result [21:25+]
-	resp[idx] = 0xFF // Return code = success
-	idx++ // [21]
-	resp[idx] = 0x04 // Transport size = byte/octet
-	idx++ // [22]
+	resp[idx] = 0xFF                                            // Return code = success
+	idx++                                                       // [21]
+	resp[idx] = 0x04                                            // Transport size = byte/octet
+	idx++                                                       // [22]
 	binary.BigEndian.PutUint16(resp[idx:], uint16(len(data)*8)) // Size in bits
-	idx += 2 // [23:25]
+	idx += 2                                                    // [23:25]
 
 	// Copy data
 	copy(resp[idx:], data)
@@ -206,10 +206,7 @@ func (m *MockClientHandler) handleWrite(request []byte) ([]byte, error) {
 	// Extract write data (starts at byte 35 in the request)
 	writeData := make([]byte, dataBytes)
 	if len(request) > 35 {
-		available := len(request) - 35
-		if available > dataBytes {
-			available = dataBytes
-		}
+		available := min(len(request)-35, dataBytes)
 		copy(writeData, request[35:35+available])
 	}
 
@@ -230,12 +227,12 @@ func (m *MockClientHandler) handleWrite(request []byte) ([]byte, error) {
 	resp[6] = 0x80
 
 	// S7 Header [7:17]
-	resp[7] = 0x32  // Protocol ID
-	resp[8] = 0x03  // Message type: Ack Data
-	resp[9] = 0x00  // Reserved
-	resp[10] = 0x00 // Reserved
-	resp[11] = request[11] // PDU ref high (echo back)
-	resp[12] = request[12] // PDU ref low (echo back)
+	resp[7] = 0x32                                // Protocol ID
+	resp[8] = 0x03                                // Message type: Ack Data
+	resp[9] = 0x00                                // Reserved
+	resp[10] = 0x00                               // Reserved
+	resp[11] = request[11]                        // PDU ref high (echo back)
+	resp[12] = request[12]                        // PDU ref low (echo back)
 	binary.BigEndian.PutUint16(resp[13:], 0x0002) // Parameter length = 2
 	binary.BigEndian.PutUint16(resp[15:], 0x0000) // Data length = 0
 
@@ -516,7 +513,7 @@ func (m *MockClientHandler) readFromMemory(area int, dbNumber int, start int, si
 	result := make([]byte, size)
 	memOffset := m.calcMemoryOffset(area, dbNumber, start)
 	if memOffset >= 0 && memOffset+size <= len(m.data) {
-		copy(result, m.data[memOffset : memOffset+size])
+		copy(result, m.data[memOffset:memOffset+size])
 	}
 	return result
 }

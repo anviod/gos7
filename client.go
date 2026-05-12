@@ -119,10 +119,10 @@ type client struct {
 // 它首先检查 *TCPClientHandler（标准实现），
 // 然后回退到 PDUProvider 接口（自定义实现）。
 func (mb *client) getPDU() int {
-	if tt, ok := interface{}(mb.transporter).(*TCPClientHandler); ok {
+	if tt, ok := any(mb.transporter).(*TCPClientHandler); ok {
 		return tt.PDULength
 	}
-	if pp, ok := interface{}(mb.transporter).(PDUProvider); ok {
+	if pp, ok := any(mb.transporter).(PDUProvider); ok {
 		return pp.GetPDULength()
 	}
 	return 480 // default PDU size
@@ -301,10 +301,7 @@ func (mb *client) readArea(area int, dbNumber int, start int, amount int, wordLe
 	// Process in chunks if amount exceeds maxElements per request
 	// 如果数量超过每次请求的最大元素数，则分块处理
 	for totElements > 0 && err == nil {
-		numElements = totElements
-		if numElements > maxElements {
-			numElements = maxElements
-		}
+		numElements = min(totElements, maxElements)
 
 		sizeRequested = numElements * wordSize
 
@@ -434,10 +431,7 @@ func (mb *client) writeArea(area int, dbnumber int, start int, amount int, wordl
 	// Process in chunks if amount exceeds maxElements per request
 	// 如果数量超过每次请求的最大元素数，则分块处理
 	for totElements > 0 && err == nil {
-		numElements = totElements
-		if numElements > maxElements {
-			numElements = maxElements
-		}
+		numElements = min(totElements, maxElements)
 		dataSize = numElements * wordSize
 		isoSize = sizeHeaderWrite + dataSize
 
@@ -559,7 +553,7 @@ func (mb *client) writeArea(area int, dbnumber int, start int, amount int, wordl
 //	value - 读取的值
 //	err - Error if any
 //	err - 错误信息
-func (mb *client) Read(variable string, buffer []byte) (value interface{}, err error) {
+func (mb *client) Read(variable string, buffer []byte) (value any, err error) {
 	variable = strings.ToUpper(variable)              // Convert to uppercase / 转换为大写
 	variable = strings.Replace(variable, " ", "", -1) // Remove spaces / 移除空格
 
@@ -775,10 +769,7 @@ func (mb *client) ReadAreas(items []S7DataItem) (err error) {
 		return
 	}
 	for i := 0; i < itemsCount; i += maxItemsPerBatch {
-		end := i + maxItemsPerBatch
-		if end > itemsCount {
-			end = itemsCount
-		}
+		end := min(i+maxItemsPerBatch, itemsCount)
 		batch := items[i:end]
 		err = mb.AGReadMulti(batch, len(batch))
 		if err != nil {
@@ -806,10 +797,7 @@ func (mb *client) WriteAreas(items []S7DataItem) (err error) {
 		return
 	}
 	for i := 0; i < itemsCount; i += maxItemsPerBatch {
-		end := i + maxItemsPerBatch
-		if end > itemsCount {
-			end = itemsCount
-		}
+		end := min(i+maxItemsPerBatch, itemsCount)
 		batch := items[i:end]
 		err = mb.AGWriteMulti(batch, len(batch))
 		if err != nil {

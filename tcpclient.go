@@ -112,14 +112,14 @@ type tcpPackager struct {
 var (
 	// smallBufferPool pools 512-byte buffers for typical PDU operations (PDU size <= 480 + header)
 	smallBufferPool = sync.Pool{
-		New: func() interface{} {
+		New: func() any {
 			buf := make([]byte, 512)
 			return &buf
 		},
 	}
 	// largeBufferPool pools 2084-byte buffers for maximum TCP message size
 	largeBufferPool = sync.Pool{
-		New: func() interface{} {
+		New: func() any {
 			buf := make([]byte, tcpMaxLength)
 			return &buf
 		},
@@ -430,7 +430,7 @@ func (mb *tcpTransporter) LocalAddr() string {
 	return addr.String()
 }
 
-func (mb *tcpTransporter) logf(format string, v ...interface{}) {
+func (mb *tcpTransporter) logf(format string, v ...any) {
 	if mb.Logger != nil {
 		mb.Logger.Printf(format, v...)
 	}
