@@ -68,6 +68,7 @@ func NewTCPClientHandler(address string, rack int, slot int) *TCPClientHandler {
 	h.Address = address
 	h.Timeout = tcpTimeout
 	h.IdleTimeout = tcpIdleTimeout
+	h.CloseTimeout = defaultCloseTimeout
 	h.ConnectionType = connectionTypeBasic // Connect to the PLC with basic connection type
 	h.PDULength = pduSizeRequested         // Set default PDU length
 	remoteTSAP := uint16(h.ConnectionType)<<8 + (uint16(rack) * 0x20) + uint16(slot)
@@ -81,6 +82,7 @@ func NewTCPClientHandlerWithConnectType(address string, rack int, slot int, conn
 	h.Address = address
 	h.Timeout = tcpTimeout
 	h.IdleTimeout = tcpIdleTimeout
+	h.CloseTimeout = defaultCloseTimeout
 	h.ConnectionType = connectType
 	h.PDULength = pduSizeRequested // Set default PDU length
 	remoteTSAP := uint16(h.ConnectionType)<<8 + (uint16(rack) * 0x20) + uint16(slot)
@@ -145,6 +147,44 @@ func putBuffer(bufPtr *[]byte) {
 	}
 }
 
+// defaultCloseTimeout is the default timeout for graceful close waiting for peer to close.
+const defaultCloseTimeout = 5 * time.Second
+
+// closeState represents the TCP connection close state.
+// It tracks the lifecycle of a connection from open to closed,
+// including the half-closed state during graceful shutdown.
+type closeState int
+
+// closeState constants represent the possible states of a TCP connection during shutdown.
+const (
+	// closeStateUnknown indicates the connection state is unknown or not initialized.
+	closeStateUnknown closeState = iota
+	// closeStateOpen indicates the connection is open and active.
+	closeStateOpen
+	// closeStateHalfClosed indicates one direction of the connection has been closed
+	// (typically after sending FIN), but the other direction may still be open.
+	// This is the TCP half-close state.
+	closeStateHalfClosed
+	// closeStateClosed indicates the connection has been fully closed.
+	closeStateClosed
+)
+
+// String returns a human-readable representation of the close state.
+func (s closeState) String() string {
+	switch s {
+	case closeStateUnknown:
+		return "unknown"
+	case closeStateOpen:
+		return "open"
+	case closeStateHalfClosed:
+		return "half_closed"
+	case closeStateClosed:
+		return "closed"
+	default:
+		return "invalid"
+	}
+}
+
 // tcpTransporter implements Transporter interface.
 type tcpTransporter struct {
 	// Connect string
@@ -153,6 +193,10 @@ type tcpTransporter struct {
 	Timeout time.Duration
 	// Idle timeout to close the connection
 	IdleTimeout time.Duration
+	// CloseTimeout is the timeout for graceful close waiting for peer to close.
+	// Default is 5 seconds (defaultCloseTimeout). If set to 0, Close() performs
+	// immediate close without graceful shutdown. Set to -1 to disable.
+	CloseTimeout time.Duration
 	// Transmission logger
 	Logger *log.Logger
 
@@ -170,6 +214,8 @@ type tcpTransporter struct {
 	LastPDUType                   byte
 
 	PDULength int
+
+	closeState closeState
 }
 
 func (mb *tcpTransporter) setConnectionParameters(address string, localTSAP uint16, remoteTSAP uint16) {
@@ -393,11 +439,29 @@ func (mb *tcpTransporter) startCloseTimer() {
 	}
 }
 
-// Close closes current connection.
+// Close closes the current connection with graceful handling of TCP half-close state.
+// If CloseTimeout > 0 (default is 5 seconds), it will wait up to that duration for the peer
+// to close their side. If the peer does not close within the timeout, the connection will
+// be forcefully closed.
+//
+// For immediate forceful close without waiting, use CloseForce().
 func (mb *tcpTransporter) Close() error {
 	mb.mu.Lock()
 	defer mb.mu.Unlock()
 
+	if mb.CloseTimeout != 0 {
+		return mb.closeGracefully()
+	}
+	return mb.close()
+}
+
+// CloseForce closes the connection immediately without waiting for the peer to close.
+// This bypasses graceful shutdown and forcibly terminates the connection.
+// Use this when immediate termination is required, such as during emergency shutdown.
+// Unlike Close(), this method ignores CloseTimeout and does not wait for peer acknowledgment.
+func (mb *tcpTransporter) CloseForce() error {
+	mb.mu.Lock()
+	defer mb.mu.Unlock()
 	return mb.close()
 }
 
@@ -465,6 +529,156 @@ func (mb *tcpTransporter) closeIdle() {
 		mb.logf("s7: closing connection due to idle timeout: %v", idle)
 		mb.close()
 	}
+}
+
+// closeGracefully performs a graceful shutdown of the TCP connection.
+// It handles the TCP half-close state by waiting for the peer to close their side
+// before fully closing the connection.
+//
+// The graceful close process:
+//  1. Transitions to half-closed state (closeStateHalfClosed)
+//  2. Closes the local connection (sends FIN to peer)
+//  3. Waits for peer to close their side or timeout (CloseTimeout)
+//  4. If timeout expires, forces immediate close
+//
+// This ensures proper cleanup in scenarios where the peer may need time to
+// process remaining data before closing their side of the connection.
+func (mb *tcpTransporter) closeGracefully() (err error) {
+	if mb.conn == nil {
+		mb.closeState = closeStateClosed
+		return nil
+	}
+
+	if mb.closeState == closeStateClosed {
+		return nil
+	}
+
+	if mb.closeState == closeStateHalfClosed {
+		mb.logf("s7: connection already in half-close state, performing final close")
+		return mb.close()
+	}
+
+	mb.logf("s7: initiating graceful close, current state: %s", mb.closeState)
+
+	conn := mb.conn
+	mb.closeState = closeStateHalfClosed
+
+	if mb.CloseTimeout <= 0 {
+		mb.CloseTimeout = defaultCloseTimeout
+	}
+
+	conn.Close()
+
+	peerClosedChan := make(chan struct{})
+	go func() {
+		abuf := smallBufferPool.Get().(*[]byte)
+		defer smallBufferPool.Put(abuf)
+		buf := *abuf
+		for {
+			conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+			n, err := conn.Read(buf)
+			if n > 0 {
+				mb.logf("s7: discarded %d bytes during graceful close", n)
+				continue
+			}
+			if err != nil {
+				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					continue
+				}
+				break
+			}
+		}
+		close(peerClosedChan)
+	}()
+
+	timeout := time.NewTimer(mb.CloseTimeout)
+	select {
+	case <-peerClosedChan:
+		mb.logf("s7: peer closed connection gracefully")
+		timeout.Stop()
+	case <-timeout.C:
+		mb.logf("s7: graceful close timeout (%v) exceeded, forcing close", mb.CloseTimeout)
+	}
+
+	return mb.close()
+}
+
+// waitForPeerClose waits for the peer to close their side of the connection
+// or until the specified timeout expires.
+//
+// This method is useful for scenarios where you want to confirm the peer has
+// finished sending data and closed their write direction before fully closing
+// the connection.
+//
+// Returns nil if peer closed successfully or timeout occurred.
+// Returns error if connection is nil or another error occurs.
+func (mb *tcpTransporter) waitForPeerClose(timeout time.Duration) error {
+	if mb.conn == nil {
+		return fmt.Errorf("connection is nil")
+	}
+
+	if mb.closeState == closeStateClosed {
+		return nil
+	}
+
+	peerClosedChan := make(chan error, 1)
+	go func() {
+		abuf := smallBufferPool.Get().(*[]byte)
+		defer smallBufferPool.Put(abuf)
+		buf := *abuf
+		for {
+			readErr := mb.conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+			if readErr != nil {
+				peerClosedChan <- readErr
+				return
+			}
+			n, err := mb.conn.Read(buf)
+			if n > 0 {
+				mb.logf("s7: discarded %d bytes while waiting for peer close", n)
+				continue
+			}
+			if err != nil {
+				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					continue
+				}
+				peerClosedChan <- err
+				return
+			}
+		}
+	}()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case err := <-peerClosedChan:
+		if err != nil && err != io.EOF {
+			return err
+		}
+		mb.logf("s7: peer closed connection (err=%v)", err)
+		return nil
+	case <-timer.C:
+		return fmt.Errorf("timeout waiting for peer to close connection")
+	}
+}
+
+// State returns the current close state of the connection.
+func (mb *tcpTransporter) State() closeState {
+	mb.mu.Lock()
+	defer mb.mu.Unlock()
+	return mb.closeState
+}
+
+// IsClosed returns true if the connection is fully closed.
+func (mb *tcpTransporter) IsClosed() bool {
+	return mb.State() == closeStateClosed
+}
+
+// IsHalfClosed returns true if the connection is in half-closed state.
+// A half-closed connection has had its write side closed (FIN sent)
+// but may still receive data from the peer.
+func (mb *tcpTransporter) IsHalfClosed() bool {
+	return mb.State() == closeStateHalfClosed
 }
 
 // reserve for future use, need to verify the request and response
